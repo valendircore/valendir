@@ -1,0 +1,126 @@
+@base = http://localhost:8080
+@token = replace-with-VALENDIR_ADMIN_WRITE_TOKEN-32plus-chars
+
+@buyer_org = org_replace_me
+@seller_org = org_replace_me
+@buyer_agent = agt_replace_me
+@seller_agent = agt_replace_me
+@buyer_public_key = paste_base64_ed25519_public_key
+@seller_public_key = paste_base64_ed25519_public_key
+@mandate = mnd_replace_me
+@clearance = clr_replace_me
+@etag = "replace-with-clearance-etag"
+
+### health
+GET {{base}}/healthz
+
+### dev keypair
+### Requires VALENDIR_DEV_MODE=true.
+POST {{base}}/v1/dev/keypair
+Authorization: Bearer {{token}}
+
+### create buyer org
+POST {{base}}/v1/orgs
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Acme Corporation",
+  "description": "Buyer"
+}
+
+### create seller org
+POST {{base}}/v1/orgs
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Northwind Supply",
+  "description": "Seller"
+}
+
+### create buyer agent
+POST {{base}}/v1/agents
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "org_id": "{{buyer_org}}",
+  "role": "Procurement Agent",
+  "scope": ["quote.accept", "po.create"],
+  "public_key_b64": "{{buyer_public_key}}"
+}
+
+### create seller agent
+POST {{base}}/v1/agents
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "org_id": "{{seller_org}}",
+  "role": "Supplier Agent",
+  "scope": ["quote.submit", "clearance.accept"],
+  "public_key_b64": "{{seller_public_key}}"
+}
+
+### create mandate for buyer agent
+POST {{base}}/v1/mandates
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "agent_id": "{{buyer_agent}}",
+  "value_limit_cents": 5000000,
+  "allowed_actions": ["procurement.quote_acceptance"],
+  "jurisdiction": "US-COMMERCIAL",
+  "policy": "AUTO_WITHIN_LIMIT",
+  "duration_days": 90
+}
+
+### create clearance
+POST {{base}}/v1/clearances
+Authorization: Bearer {{token}}
+Content-Type: application/json
+Idempotency-Key: demo-clearance-001
+
+{
+  "buyer_agent_id": "{{buyer_agent}}",
+  "seller_agent_id": "{{seller_agent}}",
+  "mandate_id": "{{mandate}}",
+  "transaction_type": "procurement.quote_acceptance",
+  "label": "MRO quote acceptance",
+  "intent_domain": "commercial_agent",
+  "intent_summary": "Buyer agent requests authorization to accept supplier quote.",
+  "system_of_record": "ERP",
+  "risk_class": "medium",
+  "value_cents": 4700000
+}
+
+### read clearance
+### Copy the ETag response header into @etag.
+GET {{base}}/v1/clearances/{{clearance}}
+Authorization: Bearer {{token}}
+
+### identify agents
+POST {{base}}/v1/clearances/{{clearance}}/identify
+Authorization: Bearer {{token}}
+If-Match: {{etag}}
+
+### build seller accept message
+GET {{base}}/v1/clearances/{{clearance}}/sign-message?action=accept&agent_id={{seller_agent}}
+Authorization: Bearer {{token}}
+
+### seller accept
+### Generate body with:
+### PRIVATE_KEY_B64=... ACTION=accept CLEARANCE_ID=... AGENT_ID=... CLEARANCE_ETAG=... NONCE=... TIMESTAMP=... go run ./examples/sign-action
+POST {{base}}/v1/clearances/{{clearance}}/accept
+Content-Type: application/json
+If-Match: {{etag}}
+
+{
+  "agent_id": "{{seller_agent}}",
+  "clearance_etag": "{{etag}}",
+  "nonce": "paste_nonce_from_sign_message",
+  "timestamp": 1710000000,
+  "signature_b64": "paste_signature"
+}
